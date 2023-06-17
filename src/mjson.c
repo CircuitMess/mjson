@@ -62,6 +62,19 @@ static int mjson_pass_string(const char *s, int len) {
   return MJSON_ERROR_INVALID_INPUT;
 }
 
+static int mjson_pass_key(const char *s, int len) {
+  int i;
+  for (i = 0; i < len; i++) {
+    if (s[i] == '\0') {
+      return MJSON_ERROR_INVALID_INPUT;
+    }
+    else if (s[i] == ':' || s[i] == ' ' || s[i] == '\t' || s[i] == '\n') {
+      return i;
+    }
+  }
+  return MJSON_ERROR_INVALID_INPUT;
+}
+
 int mjson(const char *s, int len, mjson_cb_t cb, void *ud) {
   enum { S_VALUE, S_KEY, S_COLON, S_COMMA_OR_EOO } expecting = S_VALUE;
   unsigned char nesting[MJSON_MAX_DEPTH];
@@ -136,7 +149,14 @@ int mjson(const char *s, int len, mjson_cb_t cb, void *ud) {
           i += n + 1;
           tok = MJSON_TOK_KEY;
           expecting = S_COLON;
-        } else if (c == '}') {  // Empty object
+        } else if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') {
+		  int n = mjson_pass_key(&s[i], len - i);
+		  if (n < 0) return n;
+		  if(n == 0) return MJSON_ERROR_INVALID_INPUT;
+		  i += n - 1;
+		  tok = MJSON_TOK_KEY;
+		  expecting = S_COLON;
+		} else if (c == '}') {  // Empty object
           MJSONEOO();
           expecting = S_COMMA_OR_EOO;
         } else {
@@ -253,12 +273,21 @@ static int mjson_get_cb(int tok, const char *s, int off, int len, void *ud) {
       d->d2++;
     }
   } else if (tok == MJSON_TOK_KEY && d->d1 == d->d2 + 1 &&
-             d->path[d->pos] == '.' && s[off] == '"' &&
-             s[off + len - 1] == '"' &&
-             plen1(&d->path[d->pos + 1]) == len - 2 &&
-             kcmp(s + off + 1, &d->path[d->pos + 1], len - 2) == 0) {
-    d->d2++;
-    d->pos += plen2(&d->path[d->pos + 1]) + 1;
+             d->path[d->pos] == '.') {
+
+    int condQuote = s[off] == '"' && s[off + len - 1] == '"' &&
+          plen1(&d->path[d->pos + 1]) == len - 2 &&
+          kcmp(s + off + 1, &d->path[d->pos + 1], len - 2) == 0;
+
+    int condWithout = ((s[off] >= 'a' && s[off] <= 'z') || (s[off] >= 'A' && s[off] <= 'Z') || s[off] == '_') &&
+          ((s[off+len-1] >= 'a' && s[off+len-1] <= 'z') || (s[off+len-1] >= 'A' && s[off+len-1] <= 'Z') || (s[off+len-1] >= '0' && s[off+len-1] <= '9') || s[off+len-1] == '_') &&
+          plen1(&d->path[d->pos + 1]) == len &&
+          kcmp(s + off, &d->path[d->pos + 1], len) == 0;
+
+    if(condQuote || condWithout){
+      d->d2++;
+      d->pos += plen2(&d->path[d->pos + 1]) + 1;
+    }
   } else if (tok == MJSON_TOK_KEY && d->d1 == d->d2) {
     return 1;  // Exhausted path, not found
   } else if (MJSON_TOK_IS_VALUE(tok)) {
