@@ -62,6 +62,20 @@ static int mjson_pass_string(const char *s, int len) {
   return MJSON_ERROR_INVALID_INPUT;
 }
 
+static int mjson_pass_b64(const char *s, int len) {
+  int i;
+  for (i = 0; i < len; i++) {
+    if (s[i] == '\\' && i + 1 < len && mjson_escape(s[i + 1])) {
+      i++;
+    } else if (s[i] == '\0') {
+      return MJSON_ERROR_INVALID_INPUT;
+    } else if (s[i] == '"' && i+1 < len && s[i+1] == ')') {
+      return i;
+    }
+  }
+  return MJSON_ERROR_INVALID_INPUT;
+}
+
 static int mjson_pass_key(const char *s, int len) {
   int i;
   for (i = 0; i < len; i++) {
@@ -132,6 +146,12 @@ int mjson(const char *s, int len, mjson_cb_t cb, void *ud) {
           if (n < 0) return n;
           i += n + 1;
           tok = MJSON_TOK_STRING;
+		    } else if (c  == 'a' && i + 5 < len && memcmp(&s[i], "atob(\"", 6) == 0) {
+          i += 5;
+          int n = mjson_pass_b64(&s[i + 1], len - i - 1);
+          if (n < 0) return n;
+          i += n + 2;
+          tok = MJSON_TOK_B64;
         } else {
           return MJSON_ERROR_INVALID_INPUT;
         }
@@ -294,6 +314,11 @@ static int mjson_get_cb(int tok, const char *s, int off, int len, void *ud) {
     // printf("T %d %d %d %d %d\n", tok, d->d1, d->d2, d->i1, d->i2);
     if (d->d1 == d->d2 && d->i1 == d->i2 && !d->path[d->pos]) {
       d->tok = tok;
+      if(tok == MJSON_TOK_B64){
+        off += 5;
+        len -= 6;
+      }
+
       if (d->tokptr) *d->tokptr = s + off;
       if (d->toklen) *d->toklen = len;
       return 1;
